@@ -1,0 +1,5 @@
+main_test是运行整个对比的启动文件
+ISTA_test是运行ISTA算法的文件
+BM3D_test是运行BM3D算法的文件
+stm32b_result包含了各个参数下去噪后的图
+analysis_plots包含了各个参数去噪后结果的数值
