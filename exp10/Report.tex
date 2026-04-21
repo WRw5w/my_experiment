@@ -16,10 +16,13 @@
 
 % ---- Section format ----
 \usepackage{titlesec}
+\renewcommand{\thesection}{\arabic{section}.}
+\renewcommand{\thesubsection}{\arabic{section}.\arabic{subsection}}
+
 \titleformat{\section}
-  {\normalfont\large\bfseries\raggedright}{\thesection}{1em}{}
+  {\normalfont\large\bfseries\flushleft}{\thesection}{1em}{}
 \titleformat{\subsection}
-  {\normalfont\normalsize\bfseries\raggedright}{\thesubsection}{1em}{}
+  {\normalfont\normalsize\bfseries\flushleft}{\thesubsection}{1em}{}
 
 % ---- Abstract format ----
 \renewenvironment{abstract}{%
@@ -47,6 +50,13 @@ Image denoising is a fundamental task in low-level computer vision, serving as a
 In this tenth and final experiment, we investigate the most flexible paradigm: methods that require \emph{only} the target noisy image itself for training or optimization. Specifically, we implement and evaluate \textbf{Self2Self} \cite{b1} and \textbf{Deep Image Prior (DIP)} \cite{b2}. These two methods embody fundamentally distinct philosophies in self-supervised denoising: Self2Self harnesses statistical redundancy through stochastic sub-sampling, while DIP relies on the implicit regularization imposed by the convolutional network architecture.
 
 \section{Methodology}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.45\textwidth]{unet.pdf}
+    \caption{U-Net Architecture (Common backbone for Self2Self and DIP)}
+    \label{fig:unet}
+\end{figure}
 
 \subsection{Self2Self Principle}
 
@@ -129,7 +139,7 @@ Fig.~\ref{fig:visual} illustrates the visual quality of denoised outputs produce
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.48\textwidth]{comparison_sigma25.png}
+    \includegraphics[width=0.4\textwidth]{comparison_sigma25.png}
     \caption{Visual comparison of denoising results (@ $\sigma=25$)}
     \label{fig:visual}
 \end{figure}
@@ -140,7 +150,7 @@ Fig.~\ref{fig:psnr_curve} depicts the PSNR trajectories of all evaluated methods
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.48\textwidth]{psnr_vs_sigma_comparison.png}
+    \includegraphics[width=0.4\textwidth]{psnr_vs_sigma_comparison.png}
     \caption{PSNR vs. Noise Level ($\sigma$) for all methods}
     \label{fig:psnr_curve}
 \end{figure}
@@ -174,7 +184,7 @@ Fig.~\ref{fig:all_visual} presents a side-by-side visual comparison across all e
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.48\textwidth]{visual_comparison_all_methods.png}
+    \includegraphics[width=0.4\textwidth]{visual_comparison_all_methods.png}
     \caption{Visual comparison of all evaluated methods (@ $\sigma=25$)}
     \label{fig:all_visual}
 \end{figure}
