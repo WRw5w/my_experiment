@@ -1,15 +1,17 @@
 """
-DIV2K Dataset Loader for Self2Self and DIP Denoising
-=====================================================
+DIV2K Dataset Loader for Noise2Void Denoising
+===============================================
 - Automatically downloads DIV2K High-Resolution images if not present.
 - Supports grayscale and color (RGB) modes.
-- Training: random 128x128 crop + data augmentation + online noise injection
-            + Bernoulli sampling mask for Self2Self.
+- Training: random 128×128 crop + data augmentation + online noise injection
+            + blind-spot masking for Noise2Void.
 - Testing: full-resolution images + deterministic noise (seeded).
 
-Key differences from exp9 (Neighbor2Neighbor):
-  - Self2Self: Uses Bernoulli sampling mask on input pixels, loss on masked pixels.
-  - DIP: Single-image self-supervised learning, no dataset needed (uses fixed random input).
+Key difference from exp8 (Noise2Noise):
+  - Only ONE noise realization per image (no noisy pairs needed).
+  - Blind-spot mask is generated per sample: randomly selected pixels are
+    replaced with neighbor values in the input, while the loss target
+    retains the original noisy values at those positions.
 """
 
 import os
@@ -20,6 +22,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import urllib.request
 
+from utils import compute_psnr, tensor_to_numpy, plot_training_curves
 
 # ============================================================
 # Download helpers
@@ -77,28 +80,25 @@ def prepare_div2k(data_root: str):
 
 
 # ============================================================
-# Self2Self Dataset
+# Dataset class
 # ============================================================
-class Self2SelfDataset(Dataset):
+class DIV2KDenoisingDataset(Dataset):
     """
-    DIV2K dataset for Self2Self self-supervised denoising.
+    DIV2K dataset for Noise2Void self-supervised denoising.
 
     During training:
-      - Randomly crop a (patch_size x patch_size) patch
-      - Apply random horizontal flip and 90 degree rotation
+      - Randomly crop a (patch_size × patch_size) patch
+      - Apply random horizontal flip and 90° rotation
       - Add single Gaussian noise realization (online)
-      - Generate Bernoulli sampling mask: randomly select pixels
-        - Input: masked pixels replaced with zeros (or neighbors)
-        - Target: original noisy values at all positions
-        - Loss: computed only on masked positions
+      - Generate blind-spot mask and replace masked pixels with neighbors
 
     During validation/testing:
-      - Use full-resolution images
+      - Use patches (for speed) or full-resolution images
       - Add noise with a fixed random seed for reproducibility
-      - No masking (standard forward pass for evaluation)
+      - No blind-spot masking (standard forward pass for evaluation)
 
     Returns:
-      Training:   (masked_input, noisy_target, mask)
+      Training:   (masked_input, noisy_original, mask, clean)
       Validation: (noisy, clean)
     """
 
@@ -111,16 +111,18 @@ class Self2SelfDataset(Dataset):
         mode: str = "gray",        # "gray" or "color"
         train: bool = True,
         patch_size: int = 128,
-        mask_ratio: float = 0.3,   # fraction of pixels to mask (Self2Self)
+        mask_ratio: float = 0.02,  # fraction of pixels to mask (N2V)
+        mask_window: int = 5,      # neighbor sampling window size
     ):
         """
         Args:
             img_dir:      Path to folder containing HR images.
             sigma:        Noise standard deviation (in [0, 255] scale).
             mode:         "gray" for single channel, "color" for RGB.
-            train:        If True, apply augmentation + random crop + masking.
+            train:        If True, apply augmentation + random crop + N2V masking.
             patch_size:   Crop size for training patches.
-            mask_ratio:   Fraction of pixels masked for Self2Self (training only).
+            mask_ratio:   Fraction of pixels masked for blind-spot (training only).
+            mask_window:  Window size for neighbor replacement.
         """
         super().__init__()
         self.sigma = sigma / 255.0   # store in [0,1] scale
@@ -128,6 +130,7 @@ class Self2SelfDataset(Dataset):
         self.train = train
         self.patch_size = patch_size
         self.mask_ratio = mask_ratio
+        self.mask_window = mask_window
 
         # Collect image paths
         self.image_paths = sorted([
@@ -159,28 +162,18 @@ class Self2SelfDataset(Dataset):
 
         # Convert to tensor: (C, H, W)
         if img_np.ndim == 2:
-            clean = torch.from_numpy(img_np.copy()).unsqueeze(0)   # (1, H, W)
+            clean = torch.from_numpy(img_np).unsqueeze(0)   # (1, H, W)
         else:
-            clean = torch.from_numpy(img_np.transpose(2, 0, 1).copy())  # (3, H, W)
+            clean = torch.from_numpy(img_np.transpose(2, 0, 1))  # (3, H, W)
 
         # Add single Gaussian noise realization
         noise = torch.randn_like(clean) * self.sigma
         noisy = clean + noise
 
-        if self.train:
-            # Generate Bernoulli mask
-            mask = torch.rand_like(noisy) < self.mask_ratio
-            mask = mask.float()
-            
-            # Create masked input: replace masked pixels with zeros
-            masked_input = noisy * (1 - mask)
-            
-            return masked_input, noisy, mask
-        else:
-            return noisy, clean
+        return noisy, clean
 
     def _random_crop(self, img: np.ndarray) -> np.ndarray:
-        """Randomly crop a patch_size x patch_size region."""
+        """Randomly crop a patch_size × patch_size region."""
         if img.ndim == 2:
             h, w = img.shape
         else:
@@ -191,7 +184,7 @@ class Self2SelfDataset(Dataset):
             scale = max(ps / h, ps / w) + 0.01
             new_h, new_w = int(h * scale), int(w * scale)
             pil = Image.fromarray((img * 255).astype(np.uint8))
-            pil = pil.resize((new_w, new_h), Image.Resampling.BICUBIC)
+            pil = pil.resize((new_w, new_h), Image.BICUBIC)
             img = np.array(pil, dtype=np.float32) / 255.0
             if img.ndim == 2:
                 h, w = img.shape
@@ -205,91 +198,47 @@ class Self2SelfDataset(Dataset):
         return img[top:top + ps, left:left + ps, :]
 
     def _center_crop(self, img: np.ndarray, size: int) -> np.ndarray:
-        """Center crop to size x size."""
+        """Center crop a size × size region for validation."""
         if img.ndim == 2:
             h, w = img.shape
-            top = (h - size) // 2
-            left = (w - size) // 2
-            return img[top:top + size, left:left + size]
         else:
             h, w, _ = img.shape
-            top = (h - size) // 2
-            left = (w - size) // 2
-            return img[top:top + size, left:left + size, :]
+            
+        if h < size or w < size:
+            return img  # Return as is if smaller
+            
+        top = (h - size) // 2
+        left = (w - size) // 2
+        
+        if img.ndim == 2:
+            return img[top:top + size, left:left + size]
+        return img[top:top + size, left:left + size, :]
 
-    def _augment(self, img: np.ndarray) -> np.ndarray:
-        """Random horizontal flip and 90 degree rotation."""
-        if np.random.rand() > 0.5:
+    @staticmethod
+    def _augment(img: np.ndarray) -> np.ndarray:
+        """Random horizontal flip and 90° rotation."""
+        # Horizontal flip
+        if np.random.rand() < 0.5:
             img = np.flip(img, axis=1).copy()
-        if np.random.rand() > 0.5:
-            img = np.flip(img, axis=0).copy()
+        # Random 90° rotation (0, 1, 2, or 3 times)
         k = np.random.randint(0, 4)
         if img.ndim == 2:
-            img = np.rot90(img, k)
+            img = np.rot90(img, k).copy()
         else:
-            img = np.rot90(img, k, axes=(0, 1))
+            img = np.rot90(img, k, axes=(0, 1)).copy()
         return img
 
 
-# ============================================================
-# Single Image Dataset for DIP
-# ============================================================
-class SingleImageDIPDataset(Dataset):
-    """
-    Single-image dataset for Deep Image Prior denoising.
-    
-    DIP does not use a training dataset. Instead, it:
-      - Takes a single noisy image
-      - Uses a fixed random input vector
-      - Optimizes the network to reconstruct the noisy image
-    
-    This dataset simply returns the single noisy image for training.
-    """
+if __name__ == "__main__":
+    # Quick test
+    data_root = os.path.join(os.path.dirname(__file__), "data")
+    train_dir, valid_dir = prepare_div2k(data_root)
+    print(f"Train dir: {train_dir} ({len(os.listdir(train_dir))} files)")
+    print(f"Valid dir: {valid_dir} ({len(os.listdir(valid_dir))} files)")
 
-    def __init__(
-        self,
-        image_path: str,
-        sigma: float = 25.0,
-        mode: str = "gray",
-    ):
-        """
-        Args:
-            image_path: Path to the single image (or directory for batch).
-            sigma:      Noise standard deviation (in [0, 255] scale).
-            mode:       "gray" for single channel, "color" for RGB.
-        """
-        super().__init__()
-        self.sigma = sigma / 255.0
-        self.mode = mode
-        
-        # Load image
-        if os.path.isdir(image_path):
-            # If directory, use first image
-            img_files = [f for f in os.listdir(image_path) 
-                         if os.path.splitext(f)[1].lower() in {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'}]
-            if img_files:
-                image_path = os.path.join(image_path, sorted(img_files)[0])
-            else:
-                raise ValueError(f"No images found in {image_path}")
-        
-        img = Image.open(image_path).convert("RGB")
-        if self.mode == "gray":
-            img = img.convert("L")
-        
-        img_np = np.array(img, dtype=np.float32) / 255.0
-        
-        # Convert to tensor
-        if img_np.ndim == 2:
-            self.clean = torch.from_numpy(img_np).unsqueeze(0)
-        else:
-            self.clean = torch.from_numpy(img_np.transpose(2, 0, 1))
-        
-        # Add noise
-        noise = torch.randn_like(self.clean) * self.sigma
-        self.noisy = self.clean + noise
-
-    def __len__(self) -> int:
-        return 1  # Single image
-
-    def __getitem__(self, idx: int):
-        return self.noisy, self.clean
+    ds = DIV2KDenoisingDataset(train_dir, sigma=25.0, mode="gray", train=True)
+    masked_input, noisy, mask, clean = ds[0]
+    print(f"Sample shape — masked_input: {masked_input.shape}, noisy: {noisy.shape}, "
+          f"mask: {mask.shape}, clean: {clean.shape}")
+    print(f"Masked pixels: {mask.sum().item()} / {mask.numel()} "
+          f"({mask.float().mean().item()*100:.2f}%)")
