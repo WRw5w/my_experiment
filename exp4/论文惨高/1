@@ -1,0 +1,35 @@
+
+Before the 1990s, image denoising mainly relied on Gaussian filtering, which simultaneously removed both noise and details. Then, in 1992, Rudin, Osher, and Fatemi proposed the ROF model (TV regularization), successfully achieving noise removal while preserving edges.
+\begin{equation}
+    \min_{u} \left\{ \frac{1}{2} \| u - f \|_2^2 + \lambda \| \nabla u \|_1 \right\}
+\end{equation}
+
+
+可删However, due to the difficulty of solving partial differential equations, the computation was slow and unstable.2004年左右, Daubechies 等人推动发明了ISTA算法解决了$L_1$ 范数不可微的问题。另外源于 70 年代的理论AMDD也成功解决了这个问题，在 2011 年左右由 Boyd 等人重新推广成为图像处理的主流。
+
+
+\begin{abstract}
+图像去噪是很重要的,在本篇文章中我们探讨了AMDD的实现方法,并进行了实验将其与BM3D算法和ISTA算法,FISTA算法进行比较进行比较,得到了结论,因为除开bm3d的算法都能用TV作为损失函数,而这个损失函数决定了迭代到最后的结果是一样的,那么很自然的,我想要比较在运行相同时间/轮数后后续三者的去噪水平
+以及达到相同的去噪水平所需要的时间,
+\end{abstract}
+\section{Intruductiom}
+
+Before the 1990s, image denoising primarily relied on linear smoothing methods such as \textbf{Gaussian Filtering}. However, these methods inevitably blurred the edges and details of the image while filtering out noise. To overcome this limitation, Rudin, Osher, and Fatemi proposed the famous ROF model (i.e., Total Variation TV regularization) in 1992. By introducing the $L_1$ norm as a prior constraint, this model successfully achieved the goal of effectively preserving image edge features while removing noise. Its mathematical model is as follows:
+\begin{equation}
+\min_{u} \left\{ \frac{1}{2} \| u - f \|_2^2 + \lambda \| \nabla u \|_1 \right\}
+\end{equation}
+Despite the excellent mathematical properties of the ROF model, early solvers based on \textbf{Partial Differential Equations (PDE)} faced bottlenecks of low computational efficiency and poor numerical stability. This situation was significantly improved in the 21st century:
+
+\textbf{Algorithmic Breakthrough:} Around 2004, Daubechies et al. proposed ISTA (Iterative Soft-Thresholding Algorithm). This algorithm cleverly solved the optimization problem of the $L_1$ norm term being non-differentiable at the origin through the \textbf{Proximal Operator}, providing an efficient computational framework for sparse representation and image reconstruction.
+
+\textbf{Theoretical Renaissance:} At the same time, the \textbf{ADMM (Alternating Direction Method of Multipliers)} theory, which originated in the 1970s, gained new vitality in the field of image processing. In 2011, re-popularized by Boyd et al., ADMM quickly became the mainstream algorithm for solving total variation regularization problems due to its excellent variable splitting strategy, high potential for parallelization, and robustness in handling complex constrained problems.
+
+\section*{Research Objective}
+This paper aims to compare the denoising effects of traditional denoising algorithms such as BM3D with TV-transform-based ISTA, its upgraded version FISTA, and the ADMM algorithm. Specifically, since the optimization objectives of the latter three are the same, the denoising solution is unique; therefore, we compare the computational speeds of these three. Preliminary experimental results show that BM3D has a significantly better effect on removing Gaussian noise than several algorithms based on TV transform, but its performance is worse than TV transform after adding a portion of salt-and-pepper noise.
+
+\section{Methodology}
+为了解决TV正则化不好求导的问题,ADMM将问题一份为2,一方面,利用软阈值函数解决正则项的损失,另一方面,利用数据保真来防止和原图像相差过大,并将这二者通过u来连接,从而实现了求解TV正则的化的问题
+实验环境均为0.1的高斯噪声和0.05的椒盐噪声
+第一次实验中明显ista比admm高了一截,这可能是因为ista求解TV算子只算了十次,导致精度不足
+第二次实验,将TV算子的精度调整为500次计算,但是可能是因为椒盐噪声的比例太高,导致后期L2范数惩罚过大,去噪效果先变好后变差
+第三次实验,将L2范数换成了L1范数,结果ista崩了(因为没法对L1范数进行计算)

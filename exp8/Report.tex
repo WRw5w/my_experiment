@@ -1,0 +1,168 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\graphicspath{{./results/}}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\usepackage{newtxtext,newtxmath}
+\usepackage[colorlinks=true, urlcolor=magenta]{hyperref}
+
+\makeatletter
+\renewenvironment{abstract}{%
+    \ifCLASSOPTIONtwocolumn
+      \section*{\centering \abstractname}%
+    \else
+      \begin{center}\bfseries\abstractname\end{center}\quotation
+    \fi}{%
+    \ifCLASSOPTIONtwocolumn\else\endquotation\fi}
+\makeatother
+
+\begin{document}
+
+\title{Image Denoising Based on Self-supervised Noise2Noise Learning\\
+{\footnotesize \textsuperscript{*}A Study on Training without Ground Truth Images}
+}
+
+\author{zhang cheng xi}
+
+\maketitle
+
+\begin{abstract}
+Supervised image denoising models require pairs of noisy images and their corresponding clean ground truths, which are often difficult to obtain in practical scenarios. In this work, we implement a self-supervised denoising model based on the Noise2Noise (N2N) algorithm. By using the U-Net architecture, we demonstrate that a network can learn to recover clean images by training on independent noisy realizations of the same scene. We evaluate the performance of the N2N model on the DIV2K dataset with Gaussian noise ($\sigma=25$). Experimental results show that with 50 epochs of training, the self-supervised N2N model achieves a PSNR and SSIM comparable to supervised methods, confirming its effectiveness in scenarios where ground truth is unavailable.
+The source code and reproducible experiments are available at: \url{https://github.com/WRw5w/exp8.git}.
+\end{abstract}
+
+\section{Introduction}
+Image denoising is a fundamental problem in computer vision, aiming to recover a clean image $x$ from a noisy observation $y = x + n$. While deep learning methods have achieved state-of-the-art results, they traditionally rely on supervised learning with clean ground truth images. However, in applications such as medical imaging, astronomical photography, or electron microscopy, obtaining noise-free reference samples is often impractical or entirely impossible.
+
+In this experiment, we explore the Noise2Noise (N2N) framework, which proves that under certain statistical assumptions (zero-mean noise), a network can be trained to produce clean images using only noisy pairs. This approach shifts the training target from a clean image to another independent noisy observation of the same scene. We implement this using a U-Net architecture and compare its performance against the supervised results from previous experiments across multiple noise levels.
+
+\section{Related work}
+Image denoising has seen significant progress from classical methods such as BM3D, which leverages non-local self-similarity, to specialized deep architectures like DnCNN. Supervised models define the mapping from noisy to clean images by minimizing the distance to ground truth samples. However, the requirement for clean imagery is a significant bottleneck.
+
+To mitigate this, self-supervised methods have been developed. Noise2Noise (Lehtinen et al. \cite{b1}) proved that zero-mean noise can be removed by mapping one noisy observation to another. Subsequent works like Noise2Void and Noise2Self further reduced this requirement to single noisy images by using spatial independence priors and blind-spot networks. In this experiment, we build upon the foundation of N2N to validate the viability of self-supervised learning in standardized denoising tasks.
+
+\section{Methodology}
+\subsection{Noise2Noise Principle}
+The core idea of Noise2Noise is that if we have two noisy observations $y_1 = x + n_1$ and $y_2 = x + n_2$ of the same clean image $x$, and the noise $n_1, n_2$ is zero-mean and independent, then the conditional expectation $E[y_2 | y_1]$ is equal to $x$. This holds because the expected value of zero-mean noise vanishes, leaving only the clean signal. During training, minimizing the $L_2$ loss between the network output $f_\theta(y_1)$ and the target $y_2$ encourages the network to learn the conditional mean, which effectively recovers the clean signal without ever seeing it.
+
+\subsection{Network architecture}
+The network utilizes a classic U-Net encoder-decoder structure enhanced with skip connections:
+
+\begin{figure}[htbp]
+    \centerline{\includegraphics[width=0.45\textwidth]{unet.pdf}}
+    \caption{U-Net Architecture}
+    \label{fig:unet}
+\end{figure}
+
+\begin{enumerate}
+    \item \textbf{Encoder}: Contains 4 down-sampling blocks. Each block consists of two repeated $3 \times 3$ Convolutions, Batch Normalization, and ReLU activation, followed by a $2 \times 2$ Max Pooling layer.
+    \item \textbf{Bottleneck}: The deepest layer has $1024$ channels, maintaining two consecutive convolution blocks without pooling.
+    \item \textbf{Decoder}: Contains 4 up-sampling blocks. It utilizes $2 \times 2$ Transposed Convolutions to double the spatial resolution while halving the channel depth, then concatenates the features with the corresponding skip connection from the encoder.
+    \item \textbf{Output Layer}: A final $1 \times 1$ convolution reduces the channel depth back to the input format, outputting the estimated noise residual.
+\end{enumerate}
+
+\section{Experiment}
+\subsection{Dataset and experimental setup}
+Consistent with exp7, we use the DIV2K dataset. For each clean image patch, we generate two independent additive white Gaussian noise (AWGN) realizations with $\sigma=25$. The training set comprises 200 high-resolution images, from which $128 \times 128$ patches are randomly cropped and augmented with horizontal/vertical flips and $90^\circ$ rotations.
+
+The model is trained for 50 epochs to match the supervised baseline. Both grayscale and color variants are trained separately.
+\begin{enumerate}
+    \item \textbf{Optimizer}: Adam with an initial learning rate of $1 \times 10^{-3}$.
+    \item \textbf{Scheduler}: Cosine Annealing learning rate schedule.
+    \item \textbf{Loss Function}: Mean Squared Error (MSE) computed between the prediction of the first noisy image and the second noisy image.
+\end{enumerate}
+
+\subsection{Experimental content}
+\subsubsection{Quantitative results}
+After training for 50 epochs, the Noise2Noise model is evaluated on the validation set. Table \ref{tab:gray} and Table \ref{tab:color} show the generalization results across multiple noise levels.
+
+\begin{table}[htbp]
+\caption{Noise2Noise Grayscale Model Evaluation}
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+\textbf{$\sigma$} & \textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\midrule
+15 & Noise2Noise & 29.48 & 0.7790 \\
+25 & Noise2Noise & 28.40 & 0.7302 \\
+35 & Noise2Noise & 25.21 & 0.5629 \\
+50 & Noise2Noise & 20.42 & 0.3464 \\
+\bottomrule
+\end{tabular}
+\label{tab:gray}
+\end{center}
+\end{table}
+
+\begin{table}[htbp]
+\caption{Noise2Noise Color Model Evaluation}
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+\textbf{$\sigma$} & \textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\midrule
+15 & Noise2Noise & 30.04 & 0.7954 \\
+25 & Noise2Noise & 27.78 & 0.6830 \\
+35 & Noise2Noise & 24.99 & 0.5467 \\
+50 & Noise2Noise & 21.19 & 0.3711 \\
+\bottomrule
+\end{tabular}
+\label{tab:color}
+\end{center}
+\end{table}
+
+\subsubsection{Comparison with baseline methods}
+As shown in Table \ref{tab:comparison}, the self-supervised N2N model achieves performance close to the supervised U-Net trained in exp7. This validates the premise that explicit ground truth is not strictly necessary for learning image restoration tasks if noisy pairs are available.
+
+\begin{table}[htbp]
+\caption{Comparison with Baseline Methods on Grayscale Images ($\sigma=25$)}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\midrule
+ADMM & 27.75 & 0.6438 \\
+BM3D & 29.70 & 0.7963 \\
+DnCNN & 29.99 & 0.8148 \\
+Supervised U-Net (exp7) & 29.60 & 0.7523 \\
+\midrule
+\textbf{Noise2Noise (exp8)} & 28.40 & 0.7302 \\
+\bottomrule
+\end{tabular}
+\label{tab:comparison}
+\end{center}
+\end{table}
+
+\subsubsection{Visual comparison}
+Visual results for grayscale and color denoising are presented in Fig. \ref{fig:gray} and Fig. \ref{fig:color}. The N2N model successfully removes Gaussian noise while preserving fine details and textures.
+
+\begin{figure}[htbp]
+    \centerline{\includegraphics[width=0.45\textwidth]{visual_gray_sigma25_0801.png}}
+    \caption{Self-supervised Grayscale Denoising ($\sigma=25$)}
+    \label{fig:gray}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centerline{\includegraphics[width=0.45\textwidth]{visual_color_sigma25_0801.png}}
+    \caption{Self-supervised Color Denoising ($\sigma=25$)}
+    \label{fig:color}
+\end{figure}
+
+\subsection{Running time and efficiency}
+During inference, the Noise2Noise model processes a single $512 \times 512$ image in approximately 12ms on a modern GPU, which is orders of magnitude faster than traditional methods such as BM3D that typically require several seconds per image. This speed advantage makes the self-supervised approach well-suited for real-time or batch processing applications.
+
+\section{Conclusion and discussion}
+In this study, we evaluated a self-supervised Noise2Noise-based denoiser aligned with the supervised baseline from exp7, demonstrating that competitive denoising quality can be achieved without clean ground truth imagery. However, similar to supervised models, the fixed N2N denoiser lacks the parameter-based adaptability of traditional methods like BM3D, leading to performance degradation on unseen noise intensities. Future work could explore adaptive multi-noise-level training or combine self-supervised pre-training with fine-tuning to improve robustness.
+
+\begin{thebibliography}{00}
+\bibitem{b1} J. Lehtinen, J. Munkberg, J. Hasselgren, S. Laine, T. Karras, M. Aittala, and T. Aila, ``Noise2Noise: Learning image restoration without clean data,'' in Proc. ICML, 2018, pp. 2965--2974.
+\bibitem{b2} K. Zhang, W. Zuo, Y. Chen, D. Meng, and L. Zhang, ``Beyond a Gaussian denoiser: Residual learning of deep CNN for image denoising,'' IEEE Trans. Image Process., vol. 26, no. 7, pp. 3142--3155, 2017.
+\end{thebibliography}
+
+\end{document}

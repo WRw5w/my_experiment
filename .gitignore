@@ -4,3 +4,28 @@ __pycache__/
 *.pyo
 *.pyd
 .DS_Store
+
+# Large files and data
+*.zip
+*.pth
+*.tar.gz
+*.7z
+*.rar
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Specific large data directories
+data/
+results/
+exp*/data/
+exp*/results/
+teacher/data/
+teacher/results/
+
+# Log files
+*.log
+*.aux
+*.out
+*.pdf

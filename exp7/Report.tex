@@ -1,0 +1,166 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\graphicspath{{./results/}}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\usepackage[colorlinks=true, urlcolor=magenta]{hyperref}
+\begin{document}
+
+\title{Image Denoising Based on U-Net and Comparison with DnCNN/BM3D/ADMM\\
+{\footnotesize \textsuperscript{*}A Study on Generalization Performance across Noise Intensities }
+}
+
+
+\author{zhang cheng xi}
+
+\maketitle
+
+\begin{abstract}
+Image denoising is a fundamental task in low-level computer vision. In this work, we implement a U-Net based model for Removing Gaussian noise with a fixed intensity ($\sigma=25$). The model adopts a residual learning strategy to predict the noise component. We evaluate the generalization capability of the trained model across various noise levels ($\sigma=15, 25, 35, 50$) for both grayscale and color images. Experimental results on the DIV2K dataset demonstrate that while U-Net achieves competitive performance at the trained noise level compared to baselines like ADMM, BM3D, and DnCNN, its performance degrades when applied to unseen noise intensities compared to traditional adaptive methods like BM3D.
+The source code and reproducible experiments are available at: \url{https://github.com/WRw5w/exp7}.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Image Denoising, U-Net, Deep Learning, Residual Learning, Generalization.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Image denoising aims to recover a clean image $x$ from a noisy observation $y = x + n$, where $n$ is typically assumed to be additive white Gaussian noise (AWGN). Traditional methods, such as Block-matching and 3D filtering (BM3D), typically rely on image priors like non-local self-similarity. In recent years, Convolutional Neural Networks (CNNs) have shown superior performance by learning complex mappings from data.
+
+In this assignment, we implement a U-Net based model to remove Gaussian noise. Instead of predicting the clean image directly, our U-Net adopts a residual learning strategy: it predicts the noise component mapping $\mathcal{R}(y) = \hat{n}$, and the clean image is obtained by $\hat{x} = y - \mathcal{R}(y)$. This approach has proven to significantly speed up training and boost denoising performance by simplifying the optimization landscape. Additionally, we contextualize our U-Net model's performance by comparing it against classical methods (ADMM, BM3D) and a standard deep learning baseline (DnCNN).
+
+\section{Network Architecture}
+The network utilizes a classic U-Net encoder-decoder structure enhanced with skip connections:
+
+\begin{figure}[htbp]
+    \centerline{\includegraphics[width=0.45\textwidth]{unet.pdf}}
+    \caption{U-Net Architecture}
+    \label{fig:unet}
+\end{figure}
+
+\begin{enumerate}
+    \item \textbf{Encoder}: Contains 4 down-sampling blocks. Each block consists of two repeated $3 \times 3$ Convolutions, Batch Normalization, and ReLU activation, followed by a $2 \times 2$ Max Pooling layer. The channel dimension doubles at each spatial reduction step (e.g., $64 \to 128 \to 256 \to 512$).
+    \item \textbf{Bottleneck}: The deepest layer has $1024$ channels, maintaining two consecutive convolution blocks without pooling.
+    \item \textbf{Decoder}: Contains 4 up-sampling blocks. It utilizes $2 \times 2$ Transposed Convolutions to double the spatial resolution while halving the channel depth, then concatenates the features with the corresponding skip connection from the encoder, followed by two convolution blocks.
+    \item \textbf{Output Layer}: A final $1 \times 1$ convolution reduces the channel depth back to the input format ($1$ for grayscale, $3$ for RGB), outputting the estimated noise residual.
+\end{enumerate}
+
+\section{Training Details}
+\subsection{Dataset and Augmentation}
+We use the DIV2K High-Resolution dataset. The training set (first 200 images for efficiency) is used for optimization. During training, we randomly crop $128 \times 128$ patches, apply random horizontal flips, and $0^\circ \sim 270^\circ$ random rotations to improve robustness.
+
+\subsection{Optimization Strategy}
+Online specific Gaussian noise with $\sigma=25$ is added dynamically at every iteration. The hyperparameters are as follows:
+\begin{enumerate}
+    \item \textbf{Optimizer}: Adam with an initial learning rate of $1 \times 10^{-3}$.
+    \item \textbf{Scheduler}: Cosine Annealing learning rate schedule.
+    \item \textbf{Loss Function}: Mean Squared Error (MSE).
+    \item \textbf{Epochs \& Batch Size}: Trained for 50 epochs with a batch size of 16.
+\end{enumerate}
+The training is performed using PyTorch with GPU acceleration and Automatic Mixed Precision (AMP).
+
+\section{Experimental Results}
+The trained models are evaluated on the DIV2K validation set over 20 images. The evaluation metrics are Peak Signal-to-Noise Ratio (PSNR) and Structural Similarity Index (SSIM).
+
+\subsection{Quantitative Results}
+Table \ref{tab:gray} and Table \ref{tab:color} show the performance of the U-Net model on grayscale and color images respectively across different noise levels.
+
+\begin{table}[htbp]
+\caption{Grayscale Model Evaluation}
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+\textbf{$\sigma$} & \textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\midrule
+15 & U-Net & 31.05 & 0.8101 \\
+25 & U-Net & 29.60 & 0.7523 \\
+35 & U-Net & 25.55 & 0.5528 \\
+50 & U-Net & 20.07 & 0.3112 \\
+\bottomrule
+\end{tabular}
+\label{tab:gray}
+\end{center}
+\end{table}
+
+\begin{table}[htbp]
+\caption{Color Model Evaluation}
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+\textbf{$\sigma$} & \textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\midrule
+15 & U-Net & 28.64 & 0.7046 \\
+25 & U-Net & 25.86 & 0.5487 \\
+35 & U-Net & 23.14 & 0.4160 \\
+50 & U-Net & 19.81 & 0.2767 \\
+\bottomrule
+\end{tabular}
+\label{tab:color}
+\end{center}
+\end{table}
+
+\subsection{Comparison with Baseline Methods}
+To thoroughly evaluate the proposed U-Net denoiser, we compare its performance against several representative algorithms at a fixed noise level of $\sigma=25$, referencing results from previous experiments. The baselines include ADMM (an optimization-based method), BM3D (a state-of-the-art traditional method utilizing non-local similarity), and DnCNN (a specialized deep convolutional neural network). 
+
+As shown in Table \ref{tab:comparison}, U-Net significantly outperforms the optimization-based ADMM and achieves results closely comparable to BM3D. While DnCNN attains the highest overall PSNR and SSIM, U-Net still demonstrates strong capability in structural preservation and noise removal utilizing its encoder-decoder architecture.
+
+\begin{table}[htbp]
+\caption{Comparison with Baseline Methods on Grayscale Images ($\sigma=25$)}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Method} & \textbf{PSNR (dB)} & \textbf{SSIM} \\
+\midrule
+ADMM & 27.75 & 0.6438 \\
+U-Net & 29.60 & 0.7523 \\
+BM3D & 29.70 & 0.7963 \\
+DnCNN & 29.99 & 0.8148 \\
+\bottomrule
+\end{tabular}
+\label{tab:comparison}
+\end{center}
+\end{table}
+
+\subsection{Visual Comparison}
+Fig. \ref{fig:gray} and Fig. \ref{fig:color} illustrate the visual results for $\sigma=25$.
+
+\begin{figure}[htbp]
+    \centerline{\includegraphics[width=0.45\textwidth]{visual_gray_sigma25_0801.png}}
+    \caption{Grayscale Denoising ($\sigma=25$)}
+    \label{fig:gray}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centerline{\includegraphics[width=0.45\textwidth]{visual_color_sigma25_0801.png}}
+    \caption{Color Denoising ($\sigma=25$)}
+    \label{fig:color}
+\end{figure}
+
+
+\section{Generalization Analysis}
+\begin{enumerate}
+    \item \textbf{Matched $\sigma$ Performance}: The network performs exceptionally well at $\sigma=25$ as it aligns with the training distribution.
+    \item \textbf{Extrapolation Degradation}: Performance significantly drops for $\sigma=15$ and $\sigma=50$. At $\sigma=50$, the fixed U-Net struggles to remove heavier noise since its filters are tuned for lower variance.
+    \item \textbf{Comparison with BM3D}: Traditional methods such as BM3D adapt to the provided $\sigma$ parameter, making them more robust to varying noise levels. In contrast, fixed deep learning models tend to overfit the specific intensity seen during training.
+\end{enumerate}
+
+\section{Conclusion}
+In this study, we evaluated the generalization of a U-Net based denoiser. Comparisons with baselines such as ADMM, BM3D, and DnCNN confirm that the employed U-Net model achieves competitive denoising quality at its targeted training noise level. However, while deep learning models offer state-of-the-art performance for specific noise levels, their lack of inherent parameter-based adaptability makes them less flexible than traditional methods in blind or multi-level denoising scenarios without explicit multi-level training or noise-map injection mechanisms.
+
+\section*{Acknowledgment}
+This report was prepared as part of the Week 7 Assignment. Special thanks to the course instructors for the provided dataset and baseline.
+
+\begin{thebibliography}{00}
+\bibitem{b1} K. Zhang, W. Zuo, Y. Chen, D. Meng, and L. Zhang, ``Beyond a Gaussian denoiser: Residual learning of deep CNN for image denoising,'' IEEE Trans. Image Process., vol. 26, no. 7, pp. 3142--3155, 2017.
+\bibitem{b2} O. Ronneberger, P. Fischer, and T. Brox, ``U-Net: Convolutional networks for biomedical image segmentation,'' in Proc. MICCAI, 2015, pp. 234--241.
+\end{thebibliography}
+
+\end{document}
